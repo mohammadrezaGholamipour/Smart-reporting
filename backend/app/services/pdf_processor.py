@@ -1,107 +1,155 @@
+import re
 from pathlib import Path
+
 import pymupdf
 
+from app.services.text_utils import parse_number
 
-def clean_cell(value) -> str:
-    """
-    پاک‌سازی اولیه محتوای سلول جدول.
-    فاصله‌های اضافی و خطوط جدید را حذف می‌کند.
-    """
+
+def clean_text(value) -> str:
+    """فاصله‌ها و خطوط اضافی را یکسان می‌کند (فاصلهٔ بین کلمه‌ها حفظ می‌شود)."""
     if value is None:
         return ""
-
-    return " ".join(str(value).split()).strip()
-
-
-import re
+    return re.sub(r"\s+", " ", str(value)).strip()
 
 
 def normalize_value(value):
     """
-    پاک‌سازی و تبدیل مقادیر عددی استخراج‌شده از PDF.
+    پاک‌سازی مقدار سلول جدول و تبدیل اعداد (انگلیسی/فارسی) به int یا float.
+
+    - مقدارهایی مثل «80%» یا «۱۲٪» به‌صورت متن می‌مانند تا معنای درصد از بین نرود.
+    - کدها/شماره‌های بلند یا با صفر ابتدایی (تلفن، کد ملی، ...) عدد نمی‌شوند.
     """
-
-    if value is None:
+    text = clean_text(value)
+    if not text:
         return None
 
-    value = str(value).strip()
+    text = re.sub(r"[\s,]+$", "", text)
+    number = parse_number(text, allow_percent=False)
 
-    if not value:
-        return None
+    if number is None:
+        return text
 
-    # حذف خطوط جدید و فاصله‌های اضافی
-    value = value.replace("\n", " ")
-    value = value.strip()
+    digits_only = re.sub(r"\D", "", text)
+    if len(digits_only) > 15:
+        return text
+    if re.match(r"^[+-]?0\d", re.sub(r"[,\s]", "", text)) and "." not in text:
+        return text
 
-    # حذف ویرگول‌های انتهایی و جداکننده‌های اضافی
-    value = re.sub(r"[\s,]+$", "", value)
-
-    # حذف ویرگول‌های جداکننده هزارگان
-    numeric_value = value.replace(",", "").replace(" ", "")
-
-    # تبدیل اعداد صحیح
-    if re.fullmatch(r"-?\d+", numeric_value):
-        return int(numeric_value)
-
-    # تبدیل اعداد اعشاری
-    if re.fullmatch(r"-?\d+\.\d+", numeric_value):
-        return float(numeric_value)
-
-    # اگر عدد نبود، متن را نگه دار
-    return value
+    return number
 
 
-import re
-import pymupdf
-from pathlib import Path
+def _unique_headers(raw_headers: list) -> list[str]:
+    """نام ستون‌ها را رشته، غیرخالی و یکتا می‌کند."""
+    headers: list[str] = []
+    seen: dict[str, int] = {}
+
+    for index, raw in enumerate(raw_headers, start=1):
+        name = clean_text(raw) or f"col_{index}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 1
+        headers.append(name)
+
+    return headers
 
 
-def normalize_value(value):
+def _rows_by_clip(page, table) -> list[list[str | None]] | None:
     """
-    پاک‌سازی مقدار استخراج‌شده از سلول PDF
-    و تبدیل مقادیر عددی به int یا float.
+    متن هر سلول را با برش (clip) همان ناحیه از صفحه می‌خواند.
+
+    table.extract() در بعضی PDFها فاصلهٔ بین کلمه‌ها را حذف می‌کند و جداکنندهٔ
+    هزارگان یا ممیز اعشار را جابه‌جا می‌کند (مثلاً «33.7%» را «337% .» می‌دهد)؛
+    خواندن با clip این مشکل را ندارد.
     """
-
-    if value is None:
+    try:
+        table_rows = table.rows
+    except Exception:
         return None
 
-    value = str(value).strip()
+    result: list[list[str | None]] = []
 
-    if not value:
+    for row in table_rows:
+        cells = []
+        for cell in row.cells:
+            if cell is None:
+                cells.append(None)
+                continue
+            text = page.get_text("text", clip=pymupdf.Rect(cell))
+            cells.append(text.strip() or None)
+        result.append(cells)
+
+    if not result or not any(cell for row in result for cell in row):
         return None
 
-    # یکسان‌سازی فاصله‌ها و خطوط جدید
-    value = re.sub(r"\s+", " ", value)
+    return result
 
-    # حذف ویرگول‌ها و جداکننده‌های انتهایی
-    value = re.sub(r"[\s,]+$", "", value)
 
-    # حذف جداکننده‌های هزارگان
-    numeric_value = value.replace(",", "").replace(" ", "")
+def _extract_tables(page, page_number: int) -> list[dict]:
+    tables = []
 
-    # عدد صحیح
-    if re.fullmatch(r"-?\d+", numeric_value):
-        return int(numeric_value)
+    try:
+        finder = page.find_tables()
+    except Exception:
+        # یک صفحهٔ مشکل‌دار نباید کل استخراج را متوقف کند.
+        return tables
 
-    # عدد اعشاری
-    if re.fullmatch(r"-?\d+\.\d+", numeric_value):
-        return float(numeric_value)
+    for table_index, table in enumerate(finder.tables, start=1):
+        try:
+            extracted_rows = _rows_by_clip(page, table) or table.extract()
+        except Exception:
+            continue
 
-    # در صورت متنی بودن، مقدار پاک‌سازی‌شده برگردد
-    return value
+        if not extracted_rows or len(extracted_rows) < 2:
+            continue
+
+        try:
+            header_external = bool(table.header.external)
+        except Exception:
+            header_external = False
+
+        if header_external:
+            headers = _unique_headers(list(table.header.names))
+            data_rows = extracted_rows
+        else:
+            headers = _unique_headers(extracted_rows[0])
+            data_rows = extracted_rows[1:]
+
+        if len(headers) < 2:
+            continue
+
+        rows = []
+        for row in data_rows:
+            cleaned = [normalize_value(cell) for cell in row]
+            # هم‌طول‌کردن ردیف با سرستون‌ها
+            cleaned = (cleaned + [None] * len(headers))[: len(headers)]
+            if any(cell is not None for cell in cleaned):
+                rows.append(cleaned)
+
+        if not rows:
+            continue
+
+        tables.append(
+            {
+                "page_number": page_number,
+                "table_index": table_index,
+                "header_external": header_external,
+                "headers": headers,
+                "rows": rows,
+            }
+        )
+
+    return tables
 
 
 def extract_pdf_text(pdf_path: str | Path) -> dict:
     """
-    استخراج متن و جدول‌های PDF به‌صورت صفحه‌به‌صفحه.
+    استخراج متن و جدول‌های PDF صفحه‌به‌صفحه.
 
-    خروجی شامل:
-        page_count: تعداد صفحات
-        pages: متن صفحات
-        tables: جدول‌های استخراج‌شده
-        table_count: تعداد جدول‌ها
+    خروجی: page_count, pages, tables, table_count, warnings
     """
-
     path = Path(pdf_path)
 
     if not path.is_file():
@@ -109,131 +157,38 @@ def extract_pdf_text(pdf_path: str | Path) -> dict:
 
     pages = []
     all_tables = []
+    warnings: list[str] = []
 
     with pymupdf.open(path) as document:
-
         if document.is_encrypted:
             raise ValueError("PDF is encrypted and cannot be read.")
 
         for page_number, page in enumerate(document, start=1):
-
-            # --------------------------------
-            # 1. استخراج متن صفحه
-            # --------------------------------
-
-            page_text = page.get_text("text").strip()
-
             pages.append(
                 {
                     "page_number": page_number,
-                    "text": page_text,
+                    "text": page.get_text("text").strip(),
                 }
             )
+            all_tables.extend(_extract_tables(page, page_number))
 
-            # --------------------------------
-            # 2. شناسایی جدول‌های صفحه
-            # --------------------------------
+    total_chars = sum(len(p["text"]) for p in pages)
 
-            table_finder = page.find_tables()
+    if total_chars == 0 and not all_tables:
+        raise ValueError(
+            "هیچ متنی در این PDF پیدا نشد؛ احتمالاً اسکن/تصویری است و "
+            "OCR در این نسخه پشتیبانی نمی‌شود."
+        )
 
-            for table_index, table in enumerate(table_finder.tables, start=1):
-
-                extracted_rows = table.extract()
-
-                if not extracted_rows:
-                    continue
-
-                # --------------------------------
-                # 3. تشخیص Header جدول
-                # --------------------------------
-
-                if table.header.external:
-
-                    headers = [normalize_value(cell) for cell in table.header.names]
-
-                    data_rows = extracted_rows
-
-                else:
-
-                    headers = [normalize_value(cell) for cell in extracted_rows[0]]
-
-                    data_rows = extracted_rows[1:]
-
-                # --------------------------------
-                # 4. پاک‌سازی ردیف‌ها
-                # --------------------------------
-
-                rows = []
-
-                for row in data_rows:
-
-                    cleaned_row = [normalize_value(cell) for cell in row]
-
-                    # حذف ردیف‌های کاملاً خالی
-                    if any(cell is not None for cell in cleaned_row):
-                        rows.append(cleaned_row)
-
-                # --------------------------------
-                # 5. ذخیره جدول
-                # --------------------------------
-
-                all_tables.append(
-                    {
-                        "page_number": page_number,
-                        "table_index": table_index,
-                        "header_external": table.header.external,
-                        "headers": headers,
-                        "rows": rows,
-                    }
-                )
-
-    # --------------------------------
-    # 6. خروجی نهایی
-    # --------------------------------
+    if pages and total_chars / len(pages) < 30:
+        warnings.append(
+            "حجم متن استخراج‌شده بسیار کم است؛ ممکن است بخشی از PDF تصویری باشد."
+        )
 
     return {
         "page_count": len(pages),
         "pages": pages,
         "tables": all_tables,
         "table_count": len(all_tables),
+        "warnings": warnings,
     }
-
-
-def split_text(
-    text: str,
-    chunk_size: int = 1000,
-    overlap: int = 150,
-) -> list[str]:
-    """
-    تقسیم متن به قطعه‌های هم‌پوشان.
-    """
-
-    text = text.strip()
-
-    if not text:
-        return []
-
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive")
-
-    if overlap < 0 or overlap >= chunk_size:
-        raise ValueError("overlap must be >= 0 and < chunk_size")
-
-    chunks = []
-    start = 0
-
-    while start < len(text):
-
-        end = min(start + chunk_size, len(text))
-
-        chunk = text[start:end].strip()
-
-        if chunk:
-            chunks.append(chunk)
-
-        if end == len(text):
-            break
-
-        start = end - overlap
-
-    return chunks

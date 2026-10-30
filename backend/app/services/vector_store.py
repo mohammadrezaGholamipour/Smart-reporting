@@ -1,16 +1,22 @@
+from functools import lru_cache
 from typing import Any, cast
-
-import chromadb
 
 from app.core.config import settings
 
 COLLECTION_NAME = "pdf_chunks"
 
 
-def get_collection():
-    client = chromadb.PersistentClient(path=settings.chroma_dir)
+@lru_cache(maxsize=1)
+def _get_client():
+    # import تنبل: بدون نصب chromadb هم بقیهٔ برنامه بالا می‌آید.
+    import chromadb
 
-    return client.get_or_create_collection(
+    return chromadb.PersistentClient(path=settings.chroma_dir)
+
+
+def get_collection():
+    # کلاینت فقط یک‌بار ساخته می‌شود (قبلاً در هر درخواست دوباره ساخته می‌شد).
+    return _get_client().get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
     )
@@ -30,26 +36,21 @@ def store_chunks(
     collection = get_collection()
 
     ids = [
-        (
-            f"source_{source_id}"
-            f"_page_{chunk['page_number']}"
-            f"_chunk_{chunk['chunk_index']}"
-        )
-        for chunk in chunks
+        f"source_{source_id}_page_{c['page_number']}_chunk_{c['chunk_index']}"
+        for c in chunks
     ]
-
-    documents = [chunk["text"] for chunk in chunks]
-
+    documents = [c["text"] for c in chunks]
     metadatas = [
         {
             "source_id": source_id,
-            "page_number": chunk["page_number"],
-            "chunk_index": chunk["chunk_index"],
+            "page_number": c["page_number"],
+            "chunk_index": c["chunk_index"],
+            "kind": c.get("kind", "text"),
         }
-        for chunk in chunks
+        for c in chunks
     ]
 
-    # حذف قطعه‌های قبلی همین منبع
+    # حذف قطعه‌های قبلی همین منبع تا دوباره‌کاری باعث باقی‌ماندن داده‌ی کهنه نشود.
     collection.delete(where=cast(Any, {"source_id": source_id}))
 
     collection.upsert(
@@ -66,48 +67,36 @@ def search_chunks(
     query_embedding: list[float],
     source_id: int | None = None,
     top_k: int = 3,
+    max_distance: float | None = None,
 ) -> list[dict]:
     collection = get_collection()
 
-    # اگر منبع مشخص شده باشد، جست‌وجو محدود می‌شود.
-    filters = {"source_id": source_id} if source_id is not None else None
-
-    # count() تعداد کل رکوردها را برمی‌گرداند و
-    # پارامتر where ندارد.
     total = collection.count()
-
     if total == 0:
         return []
+
+    if max_distance is None:
+        max_distance = settings.retrieval_max_distance or None
 
     query_args: dict[str, Any] = {
         "query_embeddings": [query_embedding],
         "n_results": min(top_k, total),
-        "include": [
-            "documents",
-            "metadatas",
-            "distances",
-        ],
+        "include": ["documents", "metadatas", "distances"],
     }
 
-    if filters is not None:
-        query_args["where"] = cast(Any, filters)
+    if source_id is not None:
+        query_args["where"] = cast(Any, {"source_id": source_id})
 
     results = collection.query(**query_args)
 
-    ids = results["ids"]
-    documents = results["documents"]
-    metadatas = results["metadatas"]
-    distances = results["distances"]
+    ids = results.get("ids")
+    documents = results.get("documents")
+    metadatas = results.get("metadatas")
+    distances = results.get("distances")
 
-    if not ids or not ids[0]:
+    # وقتی فیلتر source_id چیزی پیدا نکند، لیست‌ها خالی‌اند؛ خطا نیست.
+    if not ids or not ids[0] or not documents or not metadatas or not distances:
         return []
-
-    # این فیلدها ممکن است در پاسخ خالی یا ناقص None باشند.
-    if documents is None or metadatas is None or distances is None:
-        raise ValueError("ChromaDB did not return the requested result fields")
-
-    if not documents[0] or not metadatas[0] or not distances[0]:
-        raise ValueError("ChromaDB returned incomplete search results")
 
     items = []
 
@@ -117,6 +106,8 @@ def search_chunks(
         distance = distances[0][index]
 
         if text is None or metadata is None or distance is None:
+            continue
+        if max_distance is not None and distance > max_distance:
             continue
 
         items.append(
@@ -132,8 +123,4 @@ def search_chunks(
 
 
 def delete_source_chunks(source_id: int) -> None:
-    collection = get_collection()
-
-    collection.delete(
-        where={"source_id": source_id}
-    )
+    get_collection().delete(where={"source_id": source_id})
