@@ -99,27 +99,60 @@ def run_chunking(db: Session, source: DataSource) -> list[dict]:
     return chunks
 
 
-def run_embedding(db: Session, source: DataSource, chunks: list[dict] | None = None) -> int:
+def run_embedding(
+    db: Session,
+    source: DataSource,
+    chunks: list[dict] | None = None,
+) -> int:
+    """
+    ساخت embedding و ذخیره در Vector DB.
+    اگر Chunkها موجود نباشند، به‌صورت خودکار ساخته می‌شوند.
+    """
+
     if chunks is None:
         path = chunks_path(source.id)
-        if not path.is_file():
-            raise HTTPException(404, "Chunks not found. Run chunking first.")
-        chunks = json.loads(path.read_text(encoding="utf-8")).get("chunks", [])
+
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                chunks = data.get("chunks", [])
+            except (json.JSONDecodeError, OSError, AttributeError):
+                chunks = None
+
+        # اگر فایل Chunk وجود نداشت یا خراب بود،
+        # قطعه‌بندی را مجدداً اجرا می‌کنیم.
+        if chunks is None:
+            chunks = run_chunking(db, source)
 
     if not chunks:
-        raise HTTPException(422, "No text chunks found in this PDF")
+        raise HTTPException(
+            422,
+            "No text chunks found in this PDF",
+        )
 
     try:
         embeddings = embed_texts([c["text"] for c in chunks])
-        count = store_chunks(source_id=source.id, chunks=chunks, embeddings=embeddings)
+
+        count = store_chunks(
+            source_id=source.id,
+            chunks=chunks,
+            embeddings=embeddings,
+        )
+
     except HTTPException:
         raise
+
     except Exception as exc:
         db.rollback()
-        raise HTTPException(502, f"Embedding or vector storage failed: {exc}") from exc
+        raise HTTPException(
+            502,
+            f"Embedding or vector storage failed: {exc}",
+        ) from exc
 
     source.status = "embedded"
     source.error_message = None
+
     db.commit()
     db.refresh(source)
+
     return count
