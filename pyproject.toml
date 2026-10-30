@@ -17,4 +17,4 @@ dependencies = [
 ]
 
 [tool.vercel]
-entrypoint = "backend/app/main.py"
+entrypoint = "backend.app.main:app"
