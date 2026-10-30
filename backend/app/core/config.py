@@ -1,12 +1,22 @@
+
+import os
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# ریشهٔ پروژه (پوشهٔ بالاتر از app). همهٔ مسیرها نسبت به همین‌جا ساخته می‌شوند
-# تا اجرای برنامه از هر پوشه‌ای (ریشه، app و ...) نتیجهٔ یکسان بدهد.
+
+# Project root: backend/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+# Vercel has a read-only application filesystem.
+# Use /tmp for temporary writable storage.
+IS_VERCEL = os.getenv("VERCEL") == "1"
+
+if IS_VERCEL:
+    DATA_DIR = Path("/tmp/smart-reporting")
+else:
+    DATA_DIR = BASE_DIR / "data"
 
 
 class Settings(BaseSettings):
@@ -15,18 +25,19 @@ class Settings(BaseSettings):
     debug: bool = True
     api_prefix: str = "/api/v1"
 
-    # فرانت‌اند: لیست origin ها با ویرگول جدا شود. "*" یعنی همه.
+    # CORS
     cors_origins: str = "*"
 
-    # Chat model provider (OpenAI-compatible API)
+    # Chat model provider
     llm_api_key: str = "ak_d8a28043530a4f14bfbf9073ef45ee6f271c28b39e6148f7"
     llm_base_url: str = "https://api.edrac.ir"
     llm_model: str = "edrac-2"
     llm_timeout_seconds: float = 90.0
-    llm_json_mode: bool = True  # اگر مدل response_format را پشتیبانی نکرد، خودکار خاموش می‌شود
+    llm_json_mode: bool = True
     llm_answer_max_tokens: int = 1500
     llm_dashboard_max_tokens: int = 3000
 
+    # PageIndex
     pageindex_dir: str = str(DATA_DIR / "pageindex")
 
     # Embedding endpoint
@@ -35,8 +46,11 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_timeout_seconds: float = 30.0
 
-    # Persistent local storage
-    database_url: str = f"sqlite:///{(DATA_DIR / 'smart_reporting.db').as_posix()}"
+    # Storage
+    database_url: str = (
+        f"sqlite:///{(DATA_DIR / 'smart_reporting.db').as_posix()}"
+    )
+
     upload_dir: str = str(DATA_DIR / "uploads")
     processed_dir: str = str(DATA_DIR / "processed")
     chroma_dir: str = str(DATA_DIR / "chroma")
@@ -44,17 +58,17 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     allowed_pdf_extensions: str = ".pdf"
 
-    # حافظهٔ گفتگو
-    chat_history_max_messages: int = 10  # تعداد پیام‌های قبلی که به مدل داده می‌شود
-    chat_history_max_chars: int = 1500   # سقف طول هر پیام قبلی
+    # Chat history
+    chat_history_max_messages: int = 10
+    chat_history_max_chars: int = 1500
 
-    # اگر > 0 باشد، قطعه‌هایی که فاصلهٔ کسینوسی‌شان بیشتر از این مقدار است حذف می‌شوند.
+    # Retrieval
     retrieval_max_distance: float = 0.0
 
-    # داشبورد
-    dashboard_max_input_chars: int = 14000  # سقف حجم متن سند که به مدل داده می‌شود
+    # Dashboard
+    dashboard_max_input_chars: int = 14000
     dashboard_max_components: int = 30
-    dump_llm_debug: bool = False  # ذخیرهٔ خروجی خام مدل برای عیب‌یابی
+    dump_llm_debug: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
