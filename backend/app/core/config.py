@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     llm_api_key: str = "ak_d8a28043530a4f14bfbf9073ef45ee6f271c28b39e6148f7"
     llm_base_url: str = "https://api.edrac.ir"
     llm_model: str = "edrac-2"
+    
+    
+    pageindex_dir: str = "../data/pageindex"
 
     # Embedding endpoint from the supplied cURL example.
     # The API's model field/auth requirements are not confirmed yet.

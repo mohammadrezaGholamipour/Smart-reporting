@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from app.services.pageindex_service import build_source_index
 from app.services.pdf_processor import extract_pdf_text
 from app.services.embedding_client import embed_texts
 from app.services.text_chunker import split_text
@@ -358,4 +359,45 @@ def embed_source(
         raise HTTPException(
             status_code=502,
             detail=f"Embedding or vector storage failed: {exc}",
+        ) from exc
+
+
+
+@router.post("/{source_id}/pageindex")
+def index_source_with_pageindex(
+    source_id: int,
+    db: Session = Depends(get_db),
+):
+    source = db.get(DataSource, source_id)
+
+    if source is None:
+        raise HTTPException(
+            status_code=404,
+            detail="سند موردنظر پیدا نشد.",
+        )
+
+    if not source.stored_path:
+        raise HTTPException(
+            status_code=404,
+            detail="مسیر فایل PDF ثبت نشده است.",
+        )
+
+    try:
+        result = build_source_index(
+            source_id=source.id,
+            pdf_path=source.stored_path,
+        )
+
+        return result
+
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ساخت ایندکس PageIndex ناموفق بود: {exc}",
         ) from exc

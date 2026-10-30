@@ -1,0 +1,100 @@
+{
+    "summary": {
+        "total_revenue": 12450000000,
+        "total_orders": 1245,
+        "total_units_sold": 2735,
+        "total_returns": 53,
+        "average_monthly_revenue": 4150000000.0,
+        "average_order_value": 10000000.0,
+        "growth_percentage": 33.33
+    },
+    "monthly_sales": [
+        {
+            "month": "January2026",
+            "revenue": 3750000000,
+            "orders": 375,
+            "units_sold": 820,
+            "returns": 18
+        },
+        {
+            "month": "February2026",
+            "revenue": 3700000000,
+            "orders": 370,
+            "units_sold": 805,
+            "returns": 15
+        },
+        {
+            "month": "March2026",
+            "revenue": 5000000000,
+            "orders": 500,
+            "units_sold": 1110,
+            "returns": 20
+        }
+    ],
+    "regions": [
+        {
+            "region": "North",
+            "revenue": 4200000000,
+            "orders": 410,
+            "share_percentage": 33.73
+        },
+        {
+            "region": "Central",
+            "revenue": 3600000000,
+            "orders": 365,
+            "share_percentage": 28.92
+        },
+        {
+            "region": "South",
+            "revenue": 2850000000,
+            "orders": 290,
+            "share_percentage": 22.89
+        },
+        {
+            "region": "West",
+            "revenue": 1800000000,
+            "orders": 180,
+            "share_percentage": 14.46
+        }
+    ],
+    "categories": [
+        {
+            "category": "HomeAppliances",
+            "revenue": 4800000000,
+            "units_sold": 720,
+            "share_percentage": 38.55
+        },
+        {
+            "category": "Electronics",
+            "revenue": 3650000000,
+            "units_sold": 650,
+            "share_percentage": 29.32
+        },
+        {
+            "category": "PersonalCare",
+            "revenue": 2500000000,
+            "units_sold": 810,
+            "share_percentage": 20.08
+        },
+        {
+            "category": "Accessories",
+            "revenue": 1500000000,
+            "units_sold": 555,
+            "share_percentage": 12.05
+        }
+    ],
+    "insights": {
+        "top_region": {
+            "region": "North",
+            "revenue": 4200000000,
+            "orders": 410,
+            "share_percentage": 33.73
+        },
+        "top_category": {
+            "category": "HomeAppliances",
+            "revenue": 4800000000,
+            "units_sold": 720,
+            "share_percentage": 38.55
+        }
+    }
+}
